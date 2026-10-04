@@ -38,9 +38,23 @@ The POC validates the complete Hermes workflow:
 
 Hermes may create and modify files, run tests, inspect diffs, and prepare commit messages.
 
-Final Git actions remain human-controlled:
+Development follows these repository standards:
+
+- Use one branch per task, and avoid direct feature work on `main`.
+- When development runs in parallel, use one worktree per branch.
+- Keep one active writer in each worktree to prevent conflicting edits.
+- Have Veritas review changes before merge.
+- Keep merge and push actions human-controlled.
+
+The expected delivery sequence is:
 
 `Build → Test → Review → Approve → Commit → Verify → Push`
+
+## Automated Tests
+
+The `tests/` directory is the automated test surface. Run `pytest` from the
+repository root; root-level live scripts and generated example/output files are
+not part of pytest collection.
 
 ## Current Objective
 
