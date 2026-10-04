@@ -4,7 +4,13 @@ Hermes Content Production Studio is a multi-agent video pre-production system th
 
 ## Current Stage
 
-**Milestone 1 — Proof of Concept**
+**Milestone 2 — Lightweight Execution Metadata**
+
+The workflow now attaches backward-compatible execution metadata to each
+`ProductionPack`: UTC start/end timestamps, total and per-stage duration,
+agents and Hermes profiles used, revision state, and final QA status. Cost or
+credit data is reserved as `None` because Hermes does not expose it reliably;
+model/provider fields are omitted for the same reason.
 
 The POC validates the complete Hermes workflow:
 

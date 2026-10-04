@@ -1,5 +1,19 @@
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List, Optional
+
+
+@dataclass
+class ExecutionMetadata:
+    started_at: str = ""
+    ended_at: str = ""
+    total_duration_seconds: float = 0.0
+    agents_used: List[str] = field(default_factory=list)
+    profiles_used: List[str] = field(default_factory=list)
+    revision_count: int = 0
+    final_qa_status: str = ""
+    automatic_revision_occurred: bool = False
+    stage_durations_seconds: Dict[str, float] = field(default_factory=dict)
+    cost_credits: Optional[float] = None
 
 
 @dataclass
@@ -21,3 +35,4 @@ class ProductionPack:
     production_checklist: List[str] = field(default_factory=list)
     qa_status: str = ""
     qa_notes: List[str] = field(default_factory=list)
+    execution_metadata: ExecutionMetadata = field(default_factory=ExecutionMetadata)
