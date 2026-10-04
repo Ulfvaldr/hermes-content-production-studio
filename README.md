@@ -4,15 +4,16 @@ Hermes Content Production Studio is a multi-agent video pre-production system th
 
 ## Current Stage
 
-**Milestone 2 — Persisted Production Packs**
+**Milestone 2 — Persisted Production Packs and Local Run Browser**
 
 Every completed workflow run now attaches backward-compatible execution metadata
 and persists the resulting `ProductionPack` in two forms: canonical JSON for
-machine use and organized Markdown for people. Metadata includes UTC start/end
-timestamps, total and per-stage duration, agents and Hermes profiles used,
-revision state, and final QA status. Cost or credit data remains `null` because
-Hermes does not expose it reliably; model/provider fields are omitted for the
-same reason.
+machine use and organized Markdown for people. A dependency-free, read-only local
+browser lists this existing run history and renders individual production packs.
+Metadata includes UTC start/end timestamps, total and per-stage duration, agents
+and Hermes profiles used, revision state, and final QA status. Cost or credit data
+remains `null` because Hermes does not expose it reliably; model/provider fields
+are omitted for the same reason.
 
 The POC validates the complete Hermes workflow:
 
@@ -32,6 +33,7 @@ The POC validates the complete Hermes workflow:
 - `src/workflows/` — orchestration logic
 - `src/schemas/` — structured input/output models
 - `src/utils/` — shared helpers
+- `src/ui/` — dependency-free local run browser
 - `tests/` — approved POC test scenarios
 - `examples/production-packs/` — completed example outputs
 - `config/` — project configuration
@@ -100,6 +102,34 @@ without replacing it. Index entries are type-checked, and artifact paths must
 exactly match the canonical paths derived from their validated run IDs.
 
 Generated `outputs/` content is local runtime data and is not tracked by Git.
+
+## Local Run Browser
+
+From the repository root, launch the browser with Python's standard library:
+
+```bash
+python -m src.ui.run_browser
+```
+
+Then open <http://127.0.0.1:8000>. To use a different persisted output directory
+or port:
+
+```bash
+python -m src.ui.run_browser --output-root path/to/outputs --port 8080
+```
+
+The browser lists completed runs newest-first and shows run ID, topic, completion
+time, platform, production type, final QA status, revision count, and duration.
+A run detail page renders its persisted Markdown production pack and shows JSON
+and Markdown artifact paths, execution metadata, and QA information. Missing,
+empty, or malformed indexes, unknown run IDs, and missing artifacts receive
+explicit browser messages.
+
+The browser is intentionally local and read-only. It reuses `outputs/index.json`
+and the referenced `production-pack.json` and `production-pack.md` files; it has
+no database, API service, authentication, run-submission form, or second storage
+model. It never writes to or modifies persisted production-pack content. Bind to
+`127.0.0.1` (the default) unless you deliberately intend to expose the server.
 
 ## Current Objective
 
