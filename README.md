@@ -64,6 +64,7 @@ A successful `ContentProductionWorkflow.run(...)` writes one directory per run:
 
 ```text
 outputs/
+├── index.json
 └── 20260102T030405678901Z-a1b2c3d4/
     ├── production-pack.json
     └── production-pack.md
@@ -75,6 +76,29 @@ all `ProductionPack` fields, including nested `execution_metadata`.
 `production-pack.md` contains the same data in labeled sections suited to review
 and handoff. The workflow returns the `ProductionPack` as before; paths for the
 most recently completed run are available on `workflow.last_saved_output`.
+
+`outputs/index.json` is a lightweight, versioned history catalog. It stores no
+full `ProductionPack` content. Each entry contains the run ID, created and
+completed timestamps, topic, optional target audience/platform/production type,
+final QA status, revision count, whether an automatic revision occurred, total
+duration, and relative paths to that run's JSON and Markdown artifacts. Entries
+are returned newest-first by `list_runs()`; `get_run(run_id)` resolves the index
+entry and loads the full JSON artifact from the canonical path for that run ID.
+Both are available as methods on `ProductionPackStore` and as functions in
+`src.outputs.production_pack`. Workflow saves always populate `topic`; direct
+store callers that omit a `ContentRequest` record unavailable request metadata,
+including `topic`, as `null`.
+
+Run artifacts publish before the index is replaced atomically. Writers serialize
+the publish-and-index transaction with an OS-backed local lock, so concurrent
+threads and local processes accumulate entries instead of overwriting one
+another. The lock is released automatically if a process exits. If artifact or
+index persistence fails, the incomplete run is removed and no history entry is
+published. Existing run directories are never overwritten. A missing index is
+an empty history; malformed or unsupported index data raises a clear error
+without replacing it. Index entries are type-checked, and artifact paths must
+exactly match the canonical paths derived from their validated run IDs.
+
 Generated `outputs/` content is local runtime data and is not tracked by Git.
 
 ## Current Objective

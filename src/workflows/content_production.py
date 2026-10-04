@@ -137,7 +137,10 @@ class ContentProductionWorkflow:
             stage_durations_seconds=stage_durations,
         )
 
-        self.last_saved_output = self.production_pack_store.save(final_pack)
+        self.last_saved_output = self.production_pack_store.save(
+            final_pack,
+            request=request,
+        )
 
         return final_pack
 
