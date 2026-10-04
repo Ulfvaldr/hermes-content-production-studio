@@ -4,13 +4,15 @@ Hermes Content Production Studio is a multi-agent video pre-production system th
 
 ## Current Stage
 
-**Milestone 2 — Lightweight Execution Metadata**
+**Milestone 2 — Persisted Production Packs**
 
-The workflow now attaches backward-compatible execution metadata to each
-`ProductionPack`: UTC start/end timestamps, total and per-stage duration,
-agents and Hermes profiles used, revision state, and final QA status. Cost or
-credit data is reserved as `None` because Hermes does not expose it reliably;
-model/provider fields are omitted for the same reason.
+Every completed workflow run now attaches backward-compatible execution metadata
+and persists the resulting `ProductionPack` in two forms: canonical JSON for
+machine use and organized Markdown for people. Metadata includes UTC start/end
+timestamps, total and per-stage duration, agents and Hermes profiles used,
+revision state, and final QA status. Cost or credit data remains `null` because
+Hermes does not expose it reliably; model/provider fields are omitted for the
+same reason.
 
 The POC validates the complete Hermes workflow:
 
@@ -55,6 +57,25 @@ The expected delivery sequence is:
 The `tests/` directory is the automated test surface. Run `pytest` from the
 repository root; root-level live scripts and generated example/output files are
 not part of pytest collection.
+
+## Persisted Outputs
+
+A successful `ContentProductionWorkflow.run(...)` writes one directory per run:
+
+```text
+outputs/
+└── 20260102T030405678901Z-a1b2c3d4/
+    ├── production-pack.json
+    └── production-pack.md
+```
+
+The UTC timestamp plus short UUID makes each run identifier sortable and unique.
+`production-pack.json` is the deterministic, machine-readable representation of
+all `ProductionPack` fields, including nested `execution_metadata`.
+`production-pack.md` contains the same data in labeled sections suited to review
+and handoff. The workflow returns the `ProductionPack` as before; paths for the
+most recently completed run are available on `workflow.last_saved_output`.
+Generated `outputs/` content is local runtime data and is not tracked by Git.
 
 ## Current Objective
 

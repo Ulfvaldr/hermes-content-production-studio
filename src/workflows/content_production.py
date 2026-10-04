@@ -5,6 +5,7 @@ from src.agents.odin import Odin
 from src.agents.bao import Bao
 from src.agents.brokkr import Brokkr
 from src.agents.veritas import Veritas
+from src.outputs.production_pack import ProductionPackStore
 from src.schemas.production_pack import ExecutionMetadata
 
 
@@ -14,6 +15,7 @@ class ContentProductionWorkflow:
         max_revisions=1,
         clock=perf_counter,
         utc_now=None,
+        production_pack_store=None,
     ):
         self.odin = Odin()
         self.bao = Bao()
@@ -22,6 +24,12 @@ class ContentProductionWorkflow:
         self.max_revisions = max_revisions
         self._clock = clock
         self._utc_now = utc_now or (lambda: datetime.now(timezone.utc))
+        self.production_pack_store = (
+            production_pack_store
+            if production_pack_store is not None
+            else ProductionPackStore()
+        )
+        self.last_saved_output = None
 
     def run(self, request):
         workflow_started = self._clock()
@@ -128,6 +136,8 @@ class ContentProductionWorkflow:
             automatic_revision_occurred=revision_count > 0,
             stage_durations_seconds=stage_durations,
         )
+
+        self.last_saved_output = self.production_pack_store.save(final_pack)
 
         return final_pack
 

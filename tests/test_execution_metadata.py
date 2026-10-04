@@ -1,6 +1,10 @@
+import json
+import tempfile
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
 
+from src.outputs.production_pack import ProductionPackStore
 from src.schemas.production_pack import ExecutionMetadata, ProductionPack
 from src.workflows.content_production import ContentProductionWorkflow
 
@@ -60,6 +64,14 @@ class SequenceClock:
 
 
 class ExecutionMetadataWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.store = ProductionPackStore(
+            Path(self.temp_dir.name) / "outputs",
+            run_id_factory=lambda: "workflow-run",
+        )
+
     def test_pass_records_workflow_and_stage_timing(self):
         timestamps = iter(
             [
@@ -70,6 +82,7 @@ class ExecutionMetadataWorkflowTests(unittest.TestCase):
         workflow = ContentProductionWorkflow(
             clock=SequenceClock([0, 1, 3, 4, 7, 8, 13, 14, 16, 20]),
             utc_now=lambda: next(timestamps),
+            production_pack_store=self.store,
         )
         workflow.bao = FakeBao()
         workflow.brokkr = FakeBrokkr()
@@ -107,6 +120,7 @@ class ExecutionMetadataWorkflowTests(unittest.TestCase):
         workflow = ContentProductionWorkflow(
             clock=SequenceClock([0, 1, 2, 3, 5, 6, 9, 10, 14, 15, 20, 21, 23, 30]),
             utc_now=lambda: next(timestamps),
+            production_pack_store=self.store,
         )
         workflow.bao = FakeBao()
         workflow.brokkr = FakeBrokkr()
@@ -147,6 +161,7 @@ class ExecutionMetadataWorkflowTests(unittest.TestCase):
             max_revisions=0,
             clock=SequenceClock([0, 1, 2, 3, 4, 5, 6, 7, 8, 10]),
             utc_now=lambda: next(timestamps),
+            production_pack_store=self.store,
         )
         workflow.bao = FakeBao()
         workflow.brokkr = FakeBrokkr()
@@ -162,6 +177,41 @@ class ExecutionMetadataWorkflowTests(unittest.TestCase):
         self.assertEqual(metadata.revision_count, 0)
         self.assertFalse(metadata.automatic_revision_occurred)
         self.assertNotIn("brokkr_revision", metadata.stage_durations_seconds)
+
+    def test_completed_run_persists_pack_after_execution_metadata_is_attached(self):
+        timestamps = iter(
+            [
+                datetime(2026, 4, 1, tzinfo=timezone.utc),
+                datetime(2026, 4, 1, 0, 0, 10, tzinfo=timezone.utc),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ProductionPackStore(
+                Path(temp_dir) / "outputs",
+                run_id_factory=lambda: "workflow-run",
+            )
+            workflow = ContentProductionWorkflow(
+                clock=SequenceClock([0, 1, 2, 3, 4, 5, 6, 7, 8, 10]),
+                utc_now=lambda: next(timestamps),
+                production_pack_store=store,
+            )
+            workflow.bao = FakeBao()
+            workflow.brokkr = FakeBrokkr()
+            workflow.veritas = FakeVeritas([{"status": "PASS", "notes": []}])
+            workflow.odin = FakeOdin()
+
+            pack = workflow.run(object())
+
+            saved = workflow.last_saved_output
+            payload = json.loads(saved.json_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved.run_id, "workflow-run")
+            self.assertEqual(payload["script"], pack.script)
+            self.assertEqual(payload["qa_status"], "PASS")
+            self.assertEqual(
+                payload["execution_metadata"]["ended_at"],
+                "2026-04-01T00:00:10+00:00",
+            )
+            self.assertTrue(saved.markdown_path.is_file())
 
 
 if __name__ == "__main__":
