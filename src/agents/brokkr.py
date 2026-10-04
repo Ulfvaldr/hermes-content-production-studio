@@ -1,8 +1,7 @@
 import json
-import os
-import subprocess
 
 from src.schemas.production_pack import ProductionPack
+from src.utils.hermes_cli import extract_balanced_json_object, run_hermes_profile
 
 
 class Brokkr:
@@ -140,31 +139,8 @@ Requirements:
         return self._run_brokkr(prompt)
 
     def _run_brokkr(self, prompt):
-        env = os.environ.copy()
-        env["PYTHONUTF8"] = "1"
-        env["NO_COLOR"] = "1"
-
-        result = subprocess.run(
-            [
-                "hermes",
-                "-p",
-                "brokkr",
-                "chat",
-                "--oneshot",
-                "--quiet",
-                "--query-file",
-                "-",
-            ],
-            input=prompt,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            check=True,
-        )
-
-        output = (result.stdout or "").strip()
+        result = run_hermes_profile("brokkr", prompt)
+        output = result.stdout
 
         if not output:
             raise ValueError(
@@ -324,35 +300,4 @@ Requirements:
 
         return True
 
-    @staticmethod
-    def _extract_balanced_object(text, start):
-        depth = 0
-        in_string = False
-        escaped = False
-
-        for index in range(start, len(text)):
-            char = text[index]
-
-            if in_string:
-                if escaped:
-                    escaped = False
-                elif char == "\\":
-                    escaped = True
-                elif char == '"':
-                    in_string = False
-
-                continue
-
-            if char == '"':
-                in_string = True
-
-            elif char == "{":
-                depth += 1
-
-            elif char == "}":
-                depth -= 1
-
-                if depth == 0:
-                    return text[start:index + 1]
-
-        return None
+    _extract_balanced_object = staticmethod(extract_balanced_json_object)
