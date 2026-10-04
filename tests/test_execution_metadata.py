@@ -6,6 +6,7 @@ from pathlib import Path
 
 from src.outputs.production_pack import ProductionPackStore
 from src.schemas.production_pack import ExecutionMetadata, ProductionPack
+from src.schemas.request import ContentRequest
 from src.workflows.content_production import ContentProductionWorkflow
 
 
@@ -200,11 +201,22 @@ class ExecutionMetadataWorkflowTests(unittest.TestCase):
             workflow.veritas = FakeVeritas([{"status": "PASS", "notes": []}])
             workflow.odin = FakeOdin()
 
-            pack = workflow.run(object())
+            request = ContentRequest(
+                topic="Workflow topic",
+                target_audience="Editors",
+                platform="YouTube",
+                production_type="Explainer",
+            )
+            pack = workflow.run(request)
 
             saved = workflow.last_saved_output
             payload = json.loads(saved.json_path.read_text(encoding="utf-8"))
+            history_entry = store.list_runs()[0]
             self.assertEqual(saved.run_id, "workflow-run")
+            self.assertEqual(history_entry["topic"], "Workflow topic")
+            self.assertEqual(history_entry["target_audience"], "Editors")
+            self.assertEqual(history_entry["platform"], "YouTube")
+            self.assertEqual(history_entry["production_type"], "Explainer")
             self.assertEqual(payload["script"], pack.script)
             self.assertEqual(payload["qa_status"], "PASS")
             self.assertEqual(
