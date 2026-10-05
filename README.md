@@ -8,8 +8,9 @@ Hermes Content Production Studio is a multi-agent video pre-production system th
 
 Every completed workflow run now attaches backward-compatible execution metadata
 and persists the resulting `ProductionPack` in two forms: canonical JSON for
-machine use and organized Markdown for people. A dependency-free, read-only local
-browser lists this existing run history and renders individual production packs.
+machine use and organized Markdown for people. A dependency-free local browser
+lists this existing run history, renders individual production packs, and can
+submit a structured request to the existing workflow.
 Metadata includes UTC start/end timestamps, total and per-stage duration, agents
 and Hermes profiles used, revision state, and final QA status. Cost or credit data
 remains `null` because Hermes does not expose it reliably; model/provider fields
@@ -125,11 +126,18 @@ and Markdown artifact paths, execution metadata, and QA information. Missing,
 empty, or malformed indexes, unknown run IDs, and missing artifacts receive
 explicit browser messages.
 
-The browser is intentionally local and read-only. It reuses `outputs/index.json`
-and the referenced `production-pack.json` and `production-pack.md` files; it has
-no database, API service, authentication, run-submission form, or second storage
-model. It never writes to or modifies persisted production-pack content. Bind to
-`127.0.0.1` (the default) unless you deliberately intend to expose the server.
+The browser remains local and dependency-free. Its run list and detail views are
+still read-only over `outputs/index.json` and the referenced
+`production-pack.json` and `production-pack.md` files. The home page also offers
+a small structured form: topic is required, the other `ContentRequest` fields are
+optional, and submission runs the existing workflow synchronously. A successful
+submission redirects to the newly persisted run; validation and workflow failures
+return the form with a clear error and preserve entered values.
+
+There is no database, API service, authentication, background queue, or second
+storage model. Bind to `127.0.0.1` (the default) unless you deliberately intend
+to expose the server. Because submission invokes the real Hermes profiles, keep
+the terminal open until the run finishes.
 
 ## Current Objective
 

@@ -1,15 +1,23 @@
-"""Dependency-free, read-only browser for persisted production runs."""
+"""Dependency-free local browser and production run submission UI."""
 
 import argparse
 from datetime import datetime, timezone
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import logging
 from pathlib import Path
 import re
-from urllib.parse import unquote, urlsplit
+import time
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from src.outputs.production_pack import ProductionPackStore
+from src.workflows.run_submission import RunSubmissionService, SubmissionValidationError
 
+
+_MAX_REQUEST_BODY_BYTES = 64 * 1024
+_MAX_FIELD_CHARACTERS = 10_000
+_REQUEST_BODY_TIMEOUT_SECONDS = 1.0
+_LOGGER = logging.getLogger(__name__)
 
 _STYLES = """
 :root { color-scheme: dark; --bg:#0b1020; --panel:#151c30; --line:#2b3655;
@@ -33,7 +41,15 @@ tbody tr:last-child td { border-bottom:0; }.status { color:var(--good); font-wei
 .sidebar section:last-child { border-bottom:0; }.facts { display:grid; gap:.8rem; margin:0; }
 .facts div { display:grid; gap:.1rem; }.facts dt { color:var(--muted); font-size:.78rem;
   text-transform:uppercase; letter-spacing:.05em; }.facts dd { margin:0; overflow-wrap:anywhere; }
-@media (max-width:800px) { .detail-grid { grid-template-columns:1fr; } }
+.run-form { padding:1.4rem 1.6rem; }.form-grid { display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; }.field { display:grid; gap:.35rem; }
+.field-wide { grid-column:1/-1; }.field label { color:var(--muted); font-weight:700; }
+input,textarea { width:100%; border:1px solid var(--line); border-radius:8px; padding:.7rem;
+  background:var(--bg); color:var(--text); font:inherit; } textarea { min-height:6rem; resize:vertical; }
+button { margin-top:1rem; border:0; border-radius:8px; padding:.75rem 1rem;
+  background:var(--accent); color:#08101f; font:inherit; font-weight:800; cursor:pointer; }
+.error { color:#ff9c9c; font-weight:700; }
+@media (max-width:800px) { .detail-grid,.form-grid { grid-template-columns:1fr; } }
 """
 
 
@@ -114,22 +130,87 @@ def _facts(items):
     ) + "</dl>"
 
 
-class RunBrowser:
-    """Read persisted history through the existing ProductionPackStore API."""
+def _submission_form(values=None, error=None):
+    values = values or {}
 
-    def __init__(self, output_root="outputs"):
+    def field(name, label, *, wide=False, textarea=False, required=False):
+        value = escape(str(values.get(name, "")), quote=True)
+        classes = "field field-wide" if wide else "field"
+        required_attribute = " required" if required else ""
+        if textarea:
+            control = f'<textarea name="{name}"{required_attribute}>{value}</textarea>'
+        else:
+            control = f'<input name="{name}" value="{value}"{required_attribute}>'
+        return f'<div class="{classes}"><label>{escape(label)}</label>{control}</div>'
+
+    error_message = f'<p class="error">{escape(error)}</p>' if error else ""
+    fields = "".join(
+        (
+            field("topic", "Topic", wide=True, textarea=True, required=True),
+            field("target_audience", "Target audience"),
+            field("objective", "Objective"),
+            field("duration", "Duration"),
+            field("production_type", "Production type"),
+            field("platform", "Platform"),
+            field("tone", "Tone"),
+            field("notes", "Notes", wide=True, textarea=True),
+        )
+    )
+    return (
+        '<section class="panel run-form"><h2>Start a production run</h2>'
+        '<p class="muted">Runs execute locally and appear in completed runs when finished.</p>'
+        f'{error_message}<form method="post" action="/runs"><div class="form-grid">'
+        f"{fields}</div><button type=\"submit\">Start run</button></form></section>"
+    )
+
+
+class RunBrowser:
+    """Render persisted history and delegate submissions to the workflow service."""
+
+    def __init__(self, output_root="outputs", submission_service=None):
         self.output_root = Path(output_root)
         self.store = ProductionPackStore(self.output_root)
+        self.submission_service = submission_service or RunSubmissionService(
+            self.output_root
+        )
+
+    def response_for_submission(self, values):
+        """Start one local workflow and redirect to its persisted result."""
+        try:
+            run_id = self.submission_service.submit(values)
+        except SubmissionValidationError as error:
+            content = (
+                '<p class="eyebrow">Local production</p><h1>Check the request</h1>'
+                f"{_submission_form(values, str(error))}"
+            )
+            return 400, _layout("Check the request", content), None
+        except Exception:
+            _LOGGER.exception("Production run submission failed")
+            message = (
+                "The workflow or artifact persistence failed. "
+                "Check the terminal output, then try again."
+            )
+            content = (
+                '<p class="eyebrow">Local production</p>'
+                '<h1>Run could not be completed</h1>'
+                f"{_submission_form(values, message)}"
+            )
+            return 500, _layout("Run could not be completed", content), None
+        return 303, "", f"/runs/{run_id}"
 
     def response_for_path(self, path):
         """Return an HTTP status and page without mutating local history."""
         if path == "/":
             index_path = self.output_root / "index.json"
             if not index_path.exists():
-                return 200, self._message_page(
-                    "No run history index was found",
-                    f"Complete a production run first. Expected index: {index_path.as_posix()}",
+                content = (
+                    '<p class="eyebrow">Run browser</p>'
+                    '<h1>No run history index was found</h1>'
+                    '<section class="panel notice"><p>Complete a production run first. '
+                    f'Expected index: {escape(index_path.as_posix())}</p></section>'
+                    f"{_submission_form()}"
                 )
+                return 200, _layout("No run history index was found", content)
             try:
                 return 200, self.render_home()
             except ValueError as error:
@@ -174,6 +255,7 @@ class RunBrowser:
                 '<p class="eyebrow">Local production history</p>'
                 '<h1>No completed runs yet</h1>'
                 '<section class="panel notice"><p>Completed production runs will appear here.</p></section>'
+                f"{_submission_form()}"
             )
             return _layout("No completed runs", content)
         rows = []
@@ -198,7 +280,8 @@ class RunBrowser:
         )
         content = (
             '<p class="eyebrow">Local production history</p><h1>Completed runs</h1>'
-            '<p class="subtitle">Read-only view of persisted production packs.</p>' + table
+            '<p class="subtitle">Persisted production packs and local run submission.</p>'
+            f"{_submission_form()}" + table
         )
         return _layout("Completed runs", content)
 
@@ -247,13 +330,14 @@ class RunBrowser:
         return _layout(f"Run {run_id}", content)
 
 
-def create_server(host="127.0.0.1", port=8000, output_root="outputs"):
+def create_server(
+    host="127.0.0.1", port=8000, output_root="outputs", submission_service=None
+):
     """Create a local HTTP server; callers control its lifecycle."""
-    browser = RunBrowser(output_root)
+    browser = RunBrowser(output_root, submission_service=submission_service)
 
     class RunBrowserHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            status, page = browser.response_for_path(urlsplit(self.path).path)
+        def _send_page(self, status, page):
             payload = page.encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -261,10 +345,183 @@ def create_server(host="127.0.0.1", port=8000, output_root="outputs"):
             self.send_header("Cache-Control", "no-store")
             self.send_header(
                 "Content-Security-Policy",
-                "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+                "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
             )
             self.end_headers()
             self.wfile.write(payload)
+
+        def do_GET(self):
+            status, page = browser.response_for_path(urlsplit(self.path).path)
+            self._send_page(status, page)
+
+        def do_POST(self):
+            if urlsplit(self.path).path != "/runs":
+                status, page = browser.response_for_path("/not-found")
+                self._send_page(status, page)
+                return
+            raw_length = self.headers.get("Content-Length")
+            if raw_length is None:
+                self._send_page(
+                    411,
+                    browser._message_page(
+                        "Invalid request", "Content-Length is required."
+                    ),
+                )
+                return
+            try:
+                content_length = int(raw_length)
+            except ValueError:
+                content_length = -1
+            if content_length < 0:
+                self._send_page(
+                    400,
+                    browser._message_page(
+                        "Invalid request", "Content-Length must be a non-negative integer."
+                    ),
+                )
+                return
+            if content_length > _MAX_REQUEST_BODY_BYTES:
+                # Consume a bounded prefix so a just-over-limit request that is
+                # already in flight receives the HTTP error instead of a reset.
+                self.connection.settimeout(0.1)
+                try:
+                    self.rfile.read(_MAX_REQUEST_BODY_BYTES + 1)
+                except TimeoutError:
+                    pass
+                self.close_connection = True
+                self._send_page(
+                    413,
+                    browser._message_page(
+                        "Invalid request", "Request body is too large."
+                    ),
+                )
+                return
+            previous_timeout = self.connection.gettimeout()
+            deadline = time.monotonic() + _REQUEST_BODY_TIMEOUT_SECONDS
+            body_chunks = []
+            body_bytes_read = 0
+            body_timed_out = False
+            try:
+                while body_bytes_read < content_length:
+                    remaining_time = deadline - time.monotonic()
+                    if remaining_time <= 0:
+                        body_timed_out = True
+                        break
+                    self.connection.settimeout(remaining_time)
+                    try:
+                        chunk = self.rfile.read1(
+                            min(8192, content_length - body_bytes_read)
+                        )
+                    except TimeoutError:
+                        body_timed_out = True
+                        break
+                    if time.monotonic() >= deadline:
+                        body_timed_out = True
+                        break
+                    if not chunk:
+                        break
+                    body_chunks.append(chunk)
+                    body_bytes_read += len(chunk)
+            finally:
+                self.connection.settimeout(previous_timeout)
+            if body_timed_out:
+                self.close_connection = True
+                self._send_page(
+                    408,
+                    browser._message_page(
+                        "Invalid request", "Request body timed out."
+                    ),
+                )
+                return
+            raw_body = b"".join(body_chunks)
+            if len(raw_body) != content_length:
+                self.close_connection = True
+                self._send_page(
+                    400,
+                    browser._message_page(
+                        "Invalid request", "Incomplete request body."
+                    ),
+                )
+                return
+            origin = self.headers.get("Origin")
+            if origin:
+                parsed_origin = urlsplit(origin)
+                if parsed_origin.scheme not in ("http", "https") or (
+                    parsed_origin.netloc != self.headers.get("Host")
+                ):
+                    self._send_page(
+                        403,
+                        browser._message_page(
+                            "Submission rejected", "Cross-origin submission rejected."
+                        ),
+                    )
+                    return
+            content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+            if content_type != "application/x-www-form-urlencoded":
+                self._send_page(
+                    415,
+                    browser._message_page(
+                        "Invalid request", "Unsupported content type."
+                    ),
+                )
+                return
+            try:
+                body = raw_body.decode("utf-8", errors="strict")
+            except UnicodeDecodeError:
+                self._send_page(
+                    400,
+                    browser._message_page(
+                        "Invalid request", "Request body must be valid UTF-8."
+                    ),
+                )
+                return
+            try:
+                parsed_values = parse_qs(
+                    body,
+                    keep_blank_values=True,
+                    encoding="utf-8",
+                    errors="strict",
+                    max_num_fields=32,
+                )
+            except (UnicodeDecodeError, ValueError):
+                self._send_page(
+                    400,
+                    browser._message_page("Invalid request", "Invalid form data."),
+                )
+                return
+            if any(len(items) != 1 for items in parsed_values.values()):
+                self._send_page(
+                    400,
+                    browser._message_page("Invalid request", "Invalid form data."),
+                )
+                return
+            values = {name: items[0] for name, items in parsed_values.items()}
+            oversized_field = next(
+                (
+                    name
+                    for name, value in values.items()
+                    if len(value) > _MAX_FIELD_CHARACTERS
+                ),
+                None,
+            )
+            if oversized_field is not None:
+                label = oversized_field.replace("_", " ").capitalize()
+                self._send_page(
+                    400,
+                    browser._message_page(
+                        "Invalid request", f"{label} is too long."
+                    ),
+                )
+                return
+            status, page, location = browser.response_for_submission(values)
+            if location is not None:
+                self.send_response(status)
+                self.send_header("Location", location)
+                self.send_header("Content-Length", "0")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+            self._send_page(status, page)
 
         def log_message(self, template, *args):
             print(f"Run browser: {template % args}")
@@ -280,7 +537,7 @@ def main(argv=None):
     arguments = parser.parse_args(argv)
     server = create_server(arguments.host, arguments.port, arguments.output_root)
     print(
-        f"Read-only run browser: http://{arguments.host}:{server.server_port} "
+        f"Local run browser: http://{arguments.host}:{server.server_port} "
         f"(outputs: {Path(arguments.output_root).resolve()})"
     )
     try:
