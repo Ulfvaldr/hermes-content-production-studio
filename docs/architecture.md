@@ -3,10 +3,13 @@
 ## Workflow
 
 ```text
-User Request
+Local browser form
     |
     v
-  Odin
+Run submission service
+    |
+    v
+ContentProductionWorkflow
     |
     +--> Bao ------+
     |              |
@@ -14,23 +17,25 @@ User Request
     |              |
     +--> Veritas --+
     |
-    v
-Final Video Production Pack
+    +--> Odin finalization
     |
     v
 outputs/index.json + per-run JSON/Markdown
     |
     v
-Local read-only run browser (`src/ui/`)
+Read-only history and detail views
 ```
 
 ## Local Interface Boundary
 
-The browser is a standard-library HTTP presentation layer. It reads run summaries
-through `ProductionPackStore` and reads only the canonical artifact paths validated
-by the persistence layer. UI code remains separate from agent adapters, workflow
-orchestration, schemas, and persistence/index implementation. It introduces no
-storage model and cannot submit or modify runs.
+The browser is a standard-library HTTP presentation layer. Its existing run
+history views read summaries through `ProductionPackStore` and read only the
+canonical artifact paths validated by the persistence layer. A small application
+service translates form values into `ContentRequest`, validates the required
+topic, and invokes `ContentProductionWorkflow` with a store rooted at the same
+output directory. The UI owns HTTP and form rendering; persistence owns artifact
+publication; the workflow owns orchestration; agent adapters remain unchanged.
+No alternate storage model or direct UI-to-agent path is introduced.
 
 ## Design Principles
 
