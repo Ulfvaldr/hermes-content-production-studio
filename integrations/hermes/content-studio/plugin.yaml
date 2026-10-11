@@ -1,0 +1,40 @@
+manifest_version: 2
+name: content-studio
+version: 1.0.0
+description: Run the local Content Production Studio through its canonical submission service.
+author: Hermes Agent
+kind: standalone
+requires_hermes: ">=0.21"
+provides_tools:
+  - content_studio_generate
+config_schema:
+  studio_path:
+    type: str
+    description: Absolute Content Production Studio repository path.
+    required: true
+  runner_path:
+    type: str
+    description: Absolute JSON runner path; defaults to this plugin's runner.py.
+    required: false
+  python_executable:
+    type: str
+    description: Absolute Python interpreter for the Studio runtime.
+    required: true
+  output_root:
+    type: str
+    description: Approved output directory for persisted production packs.
+    required: true
+  pythonpath:
+    type: str
+    description: Explicit PYTHONPATH for the Studio repository.
+    required: false
+  subprocess_timeout_seconds:
+    type: int
+    default: 1500
+    description: Maximum Studio subprocess runtime.
+    required: false
+  max_retries:
+    type: int
+    default: 1
+    description: Maximum retry for clearly pre-launch runner-start failures only; timeout and nonzero submission failures are never retried.
+    required: false
